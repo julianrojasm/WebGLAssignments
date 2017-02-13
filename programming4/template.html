@@ -1,0 +1,453 @@
+<html>
+
+<head>
+    <title>Teapot Shading</title>
+    <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+    <script type="text/javascript" src="gl-Matrix.js"></script>
+    <script type="text/javascript" src="webgl-utils.js"></script>
+
+    <!-- Hint: Please note that I added all uniforms, attributes and varying parameters to each of vertex and fragment
+       shaders, but you need to delete the unneeded ones from each shader.
+
+       Start by implementation of your shaders, after completing shaders, work on the CPU part.
+    -->
+
+    <script id="ambient-fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+    varying vec3 vColor;
+
+    void main(void) {
+    	gl_FragColor = vec4(vColor, 1.0);
+    }
+
+</script>
+
+    <script id="ambient-vs" type="x-shader/x-vertex">
+
+        attribute vec3 aVertexPosition;
+
+        uniform mat4 uMVMatrix;
+        uniform mat4 uPMatrix;
+        uniform mat3 uNMatrix;
+
+        uniform vec3 uAmbientColor;
+
+        varying vec3 vColor;
+
+        void main(void) {
+
+            vec4 position = uMVMatrix * vec4(aVertexPosition, 1.0);
+
+            vec3 ambientColor = uAmbientColor;
+
+            vColor = ambientColor;
+
+            gl_Position = uPMatrix * position;
+        }
+
+</script>
+
+    <script id="gouraud-fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+    varying vec3 vColor;
+
+    void main(void) {
+    	gl_FragColor = vec4(vColor, 1.0);
+    }
+
+</script>
+
+    <script id="gouraud-vs" type="x-shader/x-vertex">
+
+        attribute vec3 aVertexPosition;
+        attribute vec3 aVertexNormal;
+
+        uniform mat4 uMVMatrix;
+        uniform mat4 uPMatrix;
+        uniform mat3 uNMatrix;
+
+
+        uniform float uMaterialShininess;
+
+        uniform vec3 uPointLightingLocation;
+        uniform vec3 uAmbientColor;
+        uniform vec3 uPointLightingSpecularColor;
+        uniform vec3 uPointLightingDiffuseColor;
+        uniform vec3 uKs;
+
+        varying vec3 vColor;
+
+        void main(void) {
+
+            float ka = uKs.x;
+            float kd = uKs.y;
+            float ks = uKs.z;
+
+            vec4 position = uMVMatrix * vec4(aVertexPosition, 1.0);
+
+            float specularRefraction = 1.0;
+            vec3 L = normalize(vec3(uPointLightingLocation.xyz - position.xyz));
+            vec3 N = normalize(uNMatrix * aVertexNormal);
+            vec3 R = normalize(-reflect(L,N));
+            vec3 V = normalize(-position.xyz);
+
+            vec3 ambientColor = uAmbientColor;
+            float cosAngle = max(dot(N, L), 0.0);
+            vec3 diffuseColor = clamp(uPointLightingDiffuseColor * cosAngle, 0.0, 1.0);
+            float cosPhi = max(dot(R,V), 0.0);
+            float shininess = pow(cosPhi, uMaterialShininess);
+            vec3 specularColor = clamp(uPointLightingSpecularColor * shininess, 0.0, 1.0);
+
+            vColor =  ka * ambientColor +  kd * diffuseColor  +  ks * specularColor;
+
+            gl_Position = uPMatrix * position;
+        }
+
+    </script>
+
+    <script id="phong-fs" type="x-shader/x-fragment">
+    precision mediump float;
+
+    uniform float uMaterialShininess;
+    uniform vec3 uAmbientColor;
+    uniform vec3 uPointLightingLocation;
+    uniform vec3 uPointLightingSpecularColor;
+    uniform vec3 uPointLightingDiffuseColor;
+    uniform vec3 uKs;
+
+    varying vec3 vNormal;
+    varying vec4 vPosition;
+
+    void main(void) {
+
+        float ka = uKs.x;
+        float kd = uKs.y;
+        float ks = uKs.z;
+        float specularRefraction = 1.0;
+
+        vec3 N = normalize(vNormal);
+        vec3 L = normalize(vec3(uPointLightingLocation.xyz - vPosition.xyz));
+        vec3 R = normalize(-reflect(L,N));
+        vec3 V = normalize(-vPosition.xyz);
+
+        vec3 ambientColor = uAmbientColor;
+
+        float cosAngle = max(dot(N, L), 0.0);
+        vec3 diffuseColor = clamp(uPointLightingDiffuseColor * cosAngle, 0.0, 1.0);
+
+        float cosPhi = max(dot(R,V), 0.0);
+        float shininess = pow(cosPhi, uMaterialShininess);
+        vec3 specularColor = clamp(uPointLightingSpecularColor * shininess, 0.0, 1.0);
+
+        vec3 xColor = ka * ambientColor +  kd * diffuseColor  +  ks * specularColor;
+
+
+    	gl_FragColor = vec4(xColor, 1.0);
+    }
+
+</script>
+
+    <script id="phong-vs" type="x-shader/x-vertex">
+
+        attribute vec3 aVertexPosition;
+        attribute vec3 aVertexNormal;
+
+        uniform mat4 uMVMatrix;
+        uniform mat4 uPMatrix;
+        uniform mat3 uNMatrix;
+
+
+        varying vec3 vNormal;
+        varying vec4 vPosition;
+
+        void main(void) {
+
+            vec4 position = uMVMatrix * vec4(aVertexPosition, 1.0);
+
+
+            vNormal = (uNMatrix * aVertexNormal);
+            vPosition = position;
+
+
+            gl_Position = uPMatrix * position;
+
+
+            }
+
+
+</script>
+
+
+    <script type="text/javascript">
+
+        var gl;
+
+        function initGL(canvas) {
+            try {
+                gl = canvas.getContext("experimental-webgl");
+                gl.viewportWidth = canvas.width;
+                gl.viewportHeight = canvas.height;
+            } catch (e) {
+            }
+            if (!gl) {
+                alert("Could not initialise WebGL, sorry :-(");
+            }
+        }
+
+        function getShader(gl, id) {
+
+            var shaderScript = document.getElementById(id);
+            if (!shaderScript) {
+                return null;
+            }
+            var str = "";
+            var k = shaderScript.firstChild;
+            while (k) {
+                if (k.nodeType == 3) {
+                    str += k.textContent;
+                }
+                k = k.nextSibling;
+            }
+
+            var shader;
+            if (shaderScript.type == "x-shader/x-fragment") {
+                shader = gl.createShader(gl.FRAGMENT_SHADER);
+                //alert("Fragment created!");
+            } else if (shaderScript.type == "x-shader/x-vertex") {
+                shader = gl.createShader(gl.VERTEX_SHADER);
+                //alert("Vertex created!");
+
+            } else {
+                alert("No shader created!");
+
+                return null;
+            }
+
+            gl.shaderSource(shader, str);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                alert("DID NOT COMPILE!");
+                alert(gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
+
+        // Hint: Init as an array, you will have 3 pairs of vertex and fragment shaders, hence 3 programs
+        var shaderProgram = [];
+
+        function initShaders() {
+
+            var vertexShader = [getShader(gl, "ambient-vs"), getShader(gl, "gouraud-vs"), getShader(gl, "phong-vs")];
+            var fragmentShader = [getShader(gl, "ambient-fs"), getShader(gl, "gouraud-fs"), getShader(gl, "phong-fs")];
+
+            for (var idx=0;idx<3;idx++){
+                shaderProgram[idx] = gl.createProgram();
+                gl.attachShader(shaderProgram[idx], vertexShader[idx]);
+                gl.attachShader(shaderProgram[idx], fragmentShader[idx]);
+                gl.linkProgram(shaderProgram[idx]);
+                if (!gl.getProgramParameter(shaderProgram[idx], gl.LINK_STATUS)) {
+                    alert("Could not initialise shaders");
+                }
+
+                shaderProgram[idx].vertexPositionAttribute = gl.getAttribLocation(shaderProgram[idx], "aVertexPosition");
+                shaderProgram[idx].vertexNormalAttribute = gl.getAttribLocation(shaderProgram[idx], "aVertexNormal");
+                shaderProgram[idx].pMatrixUniform = gl.getUniformLocation(shaderProgram[idx], "uPMatrix");
+                shaderProgram[idx].mvMatrixUniform = gl.getUniformLocation(shaderProgram[idx], "uMVMatrix");
+                shaderProgram[idx].nMatrixUniform = gl.getUniformLocation(shaderProgram[idx], "uNMatrix");
+                shaderProgram[idx].uPointLightingLocationUniform = gl.getUniformLocation(shaderProgram[idx], "uPointLightingLocation");
+                shaderProgram[idx].uAmbientColorUniform = gl.getUniformLocation(shaderProgram[idx], "uAmbientColor");
+                shaderProgram[idx].uMaterialShininessUniform = gl.getUniformLocation(shaderProgram[idx], "uMaterialShininess");
+                shaderProgram[idx].uPointLightingSpecularColorUniform = gl.getUniformLocation(shaderProgram[idx], "uPointLightingSpecularColor");
+                shaderProgram[idx].uPointLightingDiffuseColorUniform = gl.getUniformLocation(shaderProgram[idx], "uPointLightingDiffuseColor");
+                shaderProgram[idx].uKsUniform = gl.getUniformLocation(shaderProgram[idx], "uKs");
+            }
+
+        }
+
+        var mvMatrix = mat4.create();
+        var mvMatrixStack = [];
+        var pMatrix = mat4.create();
+        function mvPushMatrix() {
+            var copy = mat4.create();
+            mat4.set(mvMatrix, copy);
+            mvMatrixStack.push(copy);
+        }
+
+        function mvPopMatrix() {
+            if (mvMatrixStack.length == 0) {
+                throw "Invalid popMatrix!";
+            }
+            mvMatrix = mvMatrixStack.pop();
+        }
+
+        function setMatrixUniforms(idx) {
+            gl.useProgram(shaderProgram[idx]);
+            gl.uniformMatrix4fv(shaderProgram[idx].pMatrixUniform, false, pMatrix);
+            gl.uniformMatrix4fv(shaderProgram[idx].mvMatrixUniform, false, mvMatrix);
+            var normalMatrix = mat3.create();
+            mat3.normalFromMat4(normalMatrix, mvMatrix);
+            gl.uniformMatrix3fv(shaderProgram[idx].nMatrixUniform, false, normalMatrix);
+        }
+
+        function degToRad(degrees) {
+            return degrees * Math.PI / 180;
+        }
+        var teapotVertexPositionBuffer;
+        var teapotVertexNormalBuffer;
+        var teapotVertexIndexBuffer;
+
+        function handleLoadedTeapot(teapotData) {
+
+            teapotVertexNormalBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, teapotVertexNormalBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(teapotData.vertexNormals), gl.STATIC_DRAW);
+
+            teapotVertexNormalBuffer.itemSize = 3;
+            teapotVertexNormalBuffer.numItems = teapotData.vertexNormals.length / 3;
+
+
+            teapotVertexPositionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, teapotVertexPositionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(teapotData.vertexPositions), gl.STATIC_DRAW);
+
+            teapotVertexPositionBuffer.itemSize = 3;
+            teapotVertexPositionBuffer.numItems = teapotData.vertexPositions.length / 3;
+
+
+            teapotVertexIndexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, teapotVertexIndexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(teapotData.indices), gl.STATIC_DRAW);
+
+            teapotVertexIndexBuffer.itemSize = 1;
+            teapotVertexIndexBuffer.numItems = teapotData.indices.length;
+
+
+        }
+
+        function loadTeapot() {
+            var request = new XMLHttpRequest();
+            request.open("GET", "Teapot.json");
+            request.onreadystatechange = function () {
+                if (request.readyState == 4) {
+                    handleLoadedTeapot(JSON.parse(request.responseText));
+                }
+            }
+            request.send();
+        }
+
+        var teapotAngle = 180;
+
+        function drawScene() {
+            gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            if (teapotVertexPositionBuffer == null || teapotVertexNormalBuffer == null || teapotVertexIndexBuffer == null) {
+                return;
+            }
+
+            mat4.perspective(pMatrix, 45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0);
+
+            // First Teapot
+            //left one
+            gl.useProgram(shaderProgram[0]);
+            mat4.identity(mvMatrix);
+            mat4.translate(mvMatrix, mvMatrix, [-5, 5, -20]);
+            mat4.rotate(mvMatrix, mvMatrix, degToRad(23.4), [1, 0, -1]);
+            mat4.rotate(mvMatrix, mvMatrix, degToRad(teapotAngle), [0, 1, 0]);
+            mat4.scale(mvMatrix, mvMatrix, [0.35, 0.35, 0.35]);
+
+            gl.enableVertexAttribArray(shaderProgram[0].vertexPositionAttribute);
+
+            gl.uniform3f(shaderProgram[0].uAmbientColorUniform, 1.0, 0.8, 0.0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, teapotVertexPositionBuffer);
+            gl.vertexAttribPointer(shaderProgram[0].vertexPositionAttribute, teapotVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+            gl.uniformMatrix4fv(shaderProgram[0].pMatrixUniform, false, pMatrix);
+            gl.uniformMatrix4fv(shaderProgram[0].mvMatrixUniform, false, mvMatrix);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, teapotVertexIndexBuffer);
+            gl.drawElements(gl.TRIANGLES, teapotVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+
+            // Second Teapot
+            //bottom one
+            gl.useProgram(shaderProgram[1]);
+            mat4.identity(mvMatrix);
+            mat4.translate(mvMatrix, mvMatrix, [0, -2, -15]);
+            mat4.rotate(mvMatrix, mvMatrix, degToRad(23.4), [1, 0, -1]);
+            mat4.rotate(mvMatrix, mvMatrix, degToRad(teapotAngle), [0, 1, 0]);
+            mat4.scale(mvMatrix, mvMatrix, [0.35, 0.35, 0.35]);
+
+            gl.enableVertexAttribArray(shaderProgram[1].vertexPositionAttribute);
+            gl.enableVertexAttribArray(shaderProgram[1].vertexNormalAttribute);
+
+            gl.uniform3f(shaderProgram[1].uAmbientColorUniform, 1.0, 0.8, 0.0);
+            gl.uniform3f(shaderProgram[1].uPointLightingLocationUniform, 0.0, 0.0, 1.0);
+            gl.uniform3f(shaderProgram[1].uPointLightingSpecularColorUniform, 1.0, 0.8, 0.0);
+            gl.uniform3f(shaderProgram[1].uPointLightingDiffuseColorUniform, 1.0, 0.8, 0.0);
+            gl.uniform3f(shaderProgram[1].uKsUniform, 0.5, 0.5 , 0.0);
+            gl.uniform1f(shaderProgram[1].uMaterialShininessUniform, 50.0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, teapotVertexPositionBuffer);
+            gl.vertexAttribPointer(shaderProgram[1].vertexPositionAttribute, teapotVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, teapotVertexNormalBuffer);
+            gl.vertexAttribPointer(shaderProgram[1].vertexNormalAttribute, teapotVertexNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, teapotVertexIndexBuffer);
+            setMatrixUniforms(1);
+            gl.drawElements(gl.TRIANGLES, teapotVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+
+            // Third Teapot
+            //right one
+            gl.useProgram(shaderProgram[2]);
+            mat4.identity(mvMatrix);
+            mat4.translate(mvMatrix, mvMatrix, [5, 5, -20]);
+            mat4.rotate(mvMatrix, mvMatrix, degToRad(23.4), [1, 0, -1]);
+            mat4.rotate(mvMatrix, mvMatrix, degToRad(teapotAngle), [0, 1, 0]);
+            mat4.scale(mvMatrix, mvMatrix, [0.35, 0.35, 0.35]);
+
+            gl.enableVertexAttribArray(shaderProgram[2].vertexPositionAttribute);
+            gl.enableVertexAttribArray(shaderProgram[2].vertexNormalAttribute);
+
+            gl.uniform3f(shaderProgram[2].uAmbientColorUniform, 1.0, 0.8, 0.0);
+            gl.uniform3f(shaderProgram[2].uPointLightingLocationUniform, 0.0, 0.0, 1.0);
+            gl.uniform3f(shaderProgram[2].uPointLightingSpecularColorUniform, 1.0, 0.8, 0.0);
+            gl.uniform3f(shaderProgram[2].uPointLightingDiffuseColorUniform, 1.0, 0.8, 0.0);
+            gl.uniform3f(shaderProgram[2].uKsUniform, 0.2, 0.2 , 0.6);
+            gl.uniform1f(shaderProgram[2].uMaterialShininessUniform, 50.0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, teapotVertexPositionBuffer);
+            gl.vertexAttribPointer(shaderProgram[2].vertexPositionAttribute, teapotVertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ARRAY_BUFFER, teapotVertexNormalBuffer);
+            gl.vertexAttribPointer(shaderProgram[2].vertexNormalAttribute, teapotVertexNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, teapotVertexIndexBuffer);
+            setMatrixUniforms(2);
+            gl.drawElements(gl.TRIANGLES, teapotVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+        }
+
+        function tick() {
+            requestAnimFrame(tick);
+            drawScene();
+        }
+
+        function webGLStart() {
+            var canvas = document.getElementById("canvas");
+            initGL(canvas);
+            initShaders();
+            loadTeapot();
+            gl.clearColor(0.0, 0.3, 0.0, 1.0);
+            gl.enable(gl.DEPTH_TEST);
+            tick();
+        }
+
+    </script>
+
+</head>
+
+
+<body onload="webGLStart();">
+
+<canvas id="canvas" style="border: none;" width="500" height="500"></canvas>
+</body>
+
+</html>
